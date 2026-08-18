@@ -1,0 +1,41 @@
+# Copyright (c) 2025 VH & Co BV. Licensed under the Apache License 2.0. See LICENSE for details.
+
+name: GitVersion Tag
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - '.gitignore'
+      - 'README.md'
+      - 'LICENSE'
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    permissions: {}
+
+    steps:
+      - name: Mint release-bot installation token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.RELEASE_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
+          owner: vhco-pro
+          repositories: ${{ github.event.repository.name }}
+
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Tag with GitVersion
+        uses: michielvha/gitversion-tag-action@af3e2ec1a4f126a5f08c89b8de27032064d196f5 # main snapshot 2026-05-23
+        with:
+          configFilePath: 'gitversion.yml'

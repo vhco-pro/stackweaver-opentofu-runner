@@ -1,0 +1,23 @@
+# Generated from vhco-pro/.github workflow-templates/codeql-go.yml
+
+name: CodeQL
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "33 4 * * 2"
+
+# Least-privilege at top level; reusable workflow raises per-job.
+permissions: {}
+
+
+jobs:
+  analyze:
+    if: ${{ github.event.repository.visibility == 'public' }}
+    uses: vhco-pro/.github/.github/workflows/reusable-codeql-go.yml@03dd0ce7721fbd6f8d34746edbb19c69d8a10f7a # main
+    permissions:
+      security-events: write
+      contents: read
+      actions: read
