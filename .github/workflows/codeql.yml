@@ -17,6 +17,20 @@ jobs:
   analyze:
     if: ${{ github.event.repository.visibility == 'public' }}
     uses: vhco-pro/.github/.github/workflows/reusable-codeql-go.yml@03dd0ce7721fbd6f8d34746edbb19c69d8a10f7a # main
+    with:
+      # Pin the exact Go release rather than "stable": actions/setup-go resolves
+      # "stable" from its own versions-manifest, which lags a Go release by days.
+      # On 2026-08-14 that manifest still topped out at 1.26.5 while go.mod (synced
+      # from the monorepo) required 1.26.6, and CodeQL runs with GOTOOLCHAIN=local
+      # so Go cannot self-upgrade - every sync PR failed analyze and stalled the
+      # satellite release. An exact version is fetched from go.dev even when the
+      # manifest lacks it. Keep this in lockstep with the monorepo go.mod.
+      #
+      # This repo was private until 2026-08-18, so CodeQL always skipped on the
+      # visibility guard above and it never received the pin its three Go siblings
+      # got. It is public now and CodeQL is a required check, so the omission would
+      # have blocked the next PR.
+      go-version: "1.26.6"
     permissions:
       security-events: write
       contents: read
