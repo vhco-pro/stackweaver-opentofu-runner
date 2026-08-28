@@ -431,8 +431,8 @@ func processJob(
 	}
 
 	// Create workspace directory
-	// Use /home/iac/workspaces for non-root user compatibility
-	workspaceDir := fmt.Sprintf("/home/iac/workspaces/%s", workspace.ID)
+	// Use /home/stackweaver/workspaces for non-root user compatibility
+	workspaceDir := fmt.Sprintf("/home/stackweaver/workspaces/%s", workspace.ID)
 	// AUD-026: wipe the per-workspace dir before extracting this run's configuration. The path is
 	// stable (keyed on workspace ID) and reused across runs; without a clean, files deleted in the
 	// new commit (e.g. a removed .tf) survived from the previous run and got applied, and stale
