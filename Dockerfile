@@ -54,23 +54,24 @@ RUN apk add --no-cache git ca-certificates wget unzip && \
     apk del wget unzip && \
     tofu version
 
-# Create non-root user with UID 1001 to match ansible runner
-RUN addgroup -g 1001 iac && \
-    adduser -D -u 1001 -G iac -h /home/iac iac
+# Create non-root user with UID 1001 to match ansible runner. The UID, not the name, is what
+# matters for the shared workspaces volume - it stayed 1001 across the iac -> stackweaver rename.
+RUN addgroup -g 1001 stackweaver && \
+    adduser -D -u 1001 -G stackweaver -h /home/stackweaver stackweaver
 
-USER iac
+USER stackweaver
 
 # Create workspaces directory
-RUN mkdir -p /home/iac/workspaces
+RUN mkdir -p /home/stackweaver/workspaces
 
 # Copy the runner binary from builder
 COPY --from=builder /app/runner /usr/local/bin/runner
 
 # Set working directory
-WORKDIR /home/iac
+WORKDIR /home/stackweaver
 
 # Environment variables
-ENV WORKSPACES_DIR=/home/iac/workspaces
+ENV WORKSPACES_DIR=/home/stackweaver/workspaces
 
 # Run the runner
 CMD ["/usr/local/bin/runner"]
