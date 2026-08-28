@@ -430,9 +430,10 @@ func processJob(
 		}()
 	}
 
-	// Create workspace directory
-	// Use /home/stackweaver/workspaces for non-root user compatibility
-	workspaceDir := fmt.Sprintf("/home/stackweaver/workspaces/%s", workspace.ID)
+	// Create workspace directory. Honour WORKSPACES_DIR like the ansible runner does - the image
+	// sets it, Helm sets it, and the Compose bundle sets it, so hardcoding the path only agreed
+	// with those by coincidence and silently ignored any operator override.
+	workspaceDir := filepath.Join(getEnv("WORKSPACES_DIR", "/home/stackweaver/workspaces"), workspace.ID)
 	// AUD-026: wipe the per-workspace dir before extracting this run's configuration. The path is
 	// stable (keyed on workspace ID) and reused across runs; without a clean, files deleted in the
 	// new commit (e.g. a removed .tf) survived from the previous run and got applied, and stale
