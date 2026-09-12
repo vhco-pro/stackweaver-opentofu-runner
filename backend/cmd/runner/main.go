@@ -27,6 +27,7 @@ import (
 	"github.com/michielvha/stackweaver/core/plugins/opentofu"
 	"github.com/michielvha/stackweaver/core/queue"
 	"github.com/michielvha/stackweaver/core/repository"
+	"github.com/michielvha/stackweaver/core/security/archive"
 	"github.com/michielvha/stackweaver/core/services/encryptionkey"
 	"github.com/michielvha/stackweaver/core/services/logbuffer"
 	"github.com/michielvha/stackweaver/core/services/logparser"
@@ -1611,9 +1612,17 @@ func extractTarGz(data []byte, destDir string) error {
 			return fmt.Errorf("failed to read tar header: %w", err)
 		}
 
-		targetPath := filepath.Join(destDir, header.Name) //nolint:gosec // path traversal protection below
+		// Validate the entry name BEFORE constructing any filesystem path.
+		// archive.SafeEntryName uses filepath.IsLocal which CodeQL's go/zipslip
+		// query recognises as a sanitiser; the post-join HasPrefix guard below
+		// is equivalent in effect but the query does not track it.
+		safeName, err := archive.SafeEntryName(header.Name)
+		if err != nil {
+			return fmt.Errorf("invalid file path in archive: %w", err)
+		}
+		targetPath := filepath.Join(destDir, safeName) //nolint:gosec // safeName validated by archive.SafeEntryName
 
-		// Security: Prevent directory traversal - ensure targetPath is within destDir
+		// Defence-in-depth: also verify the joined path stays within destDir.
 		cleanTargetPath := filepath.Clean(targetPath)
 		cleanDestDir := filepath.Clean(destDir)
 		if !strings.HasPrefix(cleanTargetPath, cleanDestDir+string(filepath.Separator)) && cleanTargetPath != cleanDestDir {
