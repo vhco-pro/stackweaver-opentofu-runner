@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/michielvha/logger"
+	"github.com/michielvha/stackweaver/core/security/archive"
 	"github.com/michielvha/stackweaver/core/security/gitargs"
 	"github.com/michielvha/stackweaver/core/tofu"
 )
@@ -842,10 +843,24 @@ func extractTarGzForAgent(data []byte, destDir string) error {
 			return fmt.Errorf("tar read error: %w", err)
 		}
 
-		target := filepath.Join(destDir, filepath.Clean(header.Name))
-		// Ensure target is within destDir (prevent path traversal)
+		// Validate the entry name BEFORE constructing any filesystem path, matching
+		// extractTarGz in main.go. archive.SafeEntryName uses filepath.IsLocal which
+		// CodeQL's go/zipslip query recognises as a sanitiser; the post-join HasPrefix
+		// guard below is equivalent in effect but the query does not track it.
+		//
+		// This also fails closed where the previous guard skipped the entry with
+		// `continue`. A tarball carrying a traversal entry is malicious or corrupt, and
+		// silently extracting the rest left the agent running against a partial config -
+		// the queue-mode path in main.go has always returned an error here.
+		safeName, err := archive.SafeEntryName(header.Name)
+		if err != nil {
+			return fmt.Errorf("invalid file path in archive: %w", err)
+		}
+		target := filepath.Join(destDir, safeName) //nolint:gosec // safeName validated by archive.SafeEntryName
+
+		// Defence-in-depth: also verify the joined path stays within destDir.
 		if !strings.HasPrefix(target, filepath.Clean(destDir)+string(os.PathSeparator)) && target != filepath.Clean(destDir) {
-			continue
+			return fmt.Errorf("invalid file path in archive (directory traversal attempt): %s", header.Name)
 		}
 
 		switch header.Typeflag {
