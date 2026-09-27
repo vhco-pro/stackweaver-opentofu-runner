@@ -273,6 +273,26 @@ func main() {
 	cancel()
 }
 
+// newRunWorkDir creates a fresh, private working directory for one job under baseDir and returns
+// it with a cleanup func that removes it. The name carries the workspace ID for debuggability,
+// but every job gets its own directory, so concurrent or consecutive runs of one workspace never
+// share files (#109).
+func newRunWorkDir(baseDir, workspaceID string) (string, func(), error) {
+	if err := os.MkdirAll(baseDir, 0o755); err != nil { //nolint:gosec // the base dir is a shared mount point, not run data
+		return "", nil, fmt.Errorf("creating workspaces base directory: %w", err)
+	}
+	dir, err := os.MkdirTemp(baseDir, workspaceID+"-run-")
+	if err != nil {
+		return "", nil, fmt.Errorf("creating run working directory: %w", err)
+	}
+	cleanup := func() {
+		if err := os.RemoveAll(dir); err != nil {
+			logger.Warnf("Failed to remove run working directory %s: %v", dir, err)
+		}
+	}
+	return dir, cleanup, nil
+}
+
 // errPoisonMessage marks a queue message that can never be processed (e.g. an unmarshalable
 // payload) so the consume loop dead-letters it instead of retrying it forever (AUD-015).
 var errPoisonMessage = errors.New("unprocessable message")
@@ -431,21 +451,19 @@ func processJob(
 		}()
 	}
 
-	// Create workspace directory. Honour WORKSPACES_DIR like the ansible runner does - the image
-	// sets it, Helm sets it, and the Compose bundle sets it, so hardcoding the path only agreed
-	// with those by coincidence and silently ignored any operator override.
-	workspaceDir := filepath.Join(getEnv("WORKSPACES_DIR", "/home/stackweaver/workspaces"), workspace.ID)
-	// AUD-026: wipe the per-workspace dir before extracting this run's configuration. The path is
-	// stable (keyed on workspace ID) and reused across runs; without a clean, files deleted in the
-	// new commit (e.g. a removed .tf) survived from the previous run and got applied, and stale
-	// tfvars/plan files lingered. RemoveAll + MkdirAll gives each run a clean checkout (agent mode
-	// already does this via MkdirTemp; this is the platform-runner twin).
-	if err := os.RemoveAll(workspaceDir); err != nil {
-		return fmt.Errorf("failed to clean workspace directory: %w", err)
+	// Create this job's working directory. Honour WORKSPACES_DIR like the ansible runner does - the
+	// image sets it, Helm sets it, and the Compose bundle sets it, so hardcoding the path only
+	// agreed with those by coincidence and silently ignored any operator override.
+	// #109 / AUD-026: the directory is ephemeral - a fresh temp dir per job, removed when the job
+	// returns - so configuration, decrypted tfvars, state and provider binaries never outlive the
+	// run that needed them. Agent mode does the same (runTerraform in agent_mode.go). Nothing
+	// carries across jobs through the filesystem: state is restored from the state service and
+	// the saved plan crosses the plan/apply boundary through object storage (AUD-148/149).
+	workspaceDir, cleanupWorkDir, err := newRunWorkDir(getEnv("WORKSPACES_DIR", "/home/stackweaver/workspaces"), workspace.ID)
+	if err != nil {
+		return err
 	}
-	if err := os.MkdirAll(workspaceDir, 0o755); err != nil { //nolint:gosec // workspace directories need 0o755 for compatibility
-		return fmt.Errorf("failed to create workspace directory: %w", err)
-	}
+	defer cleanupWorkDir()
 
 	// TFE-compatible: Download configuration files from storage if configuration version exists
 	// This is the primary method - configuration files are uploaded via PUT /api/v2/configuration-versions/:id/upload
@@ -562,7 +580,7 @@ func processJob(
 	}
 
 	// AUD-149: restore the workspace's current state before running terraform. The remote runner uses
-	// a local backend (terraform.tfstate) in a workspace dir that is wiped for a clean checkout each
+	// a local backend (terraform.tfstate) in a working dir that is freshly created (and removed) for each
 	// job, so without this every run starts from EMPTY state - a destroy would find nothing to destroy
 	// and a second apply would try to recreate everything. The agent runner already does this
 	// (agent_mode.go); the platform runner was missing it. No-op on a fresh workspace with no state.
@@ -1000,7 +1018,7 @@ func processJob(
 		}
 	}()
 
-	// AUD-148: the plan and apply phases run as separate jobs, and each job wipes the workspace dir
+	// AUD-148: the plan and apply phases run as separate jobs, and each job gets a fresh working dir
 	// for a clean checkout - so the plan.out the plan phase saved is gone by the time the apply job
 	// runs `terraform apply plan.out`. Persist the saved plan across the phase boundary through object
 	// storage so the apply phase runs the exact plan that was reviewed (TFE semantics), not a re-plan.
@@ -1395,7 +1413,7 @@ func processJob(
 				}
 			},
 		}
-		// AUD-148: this apply job wiped the workspace dir and re-extracted config, so the plan.out the
+		// AUD-148: this apply job runs in a fresh working dir with re-extracted config, so the plan.out the
 		// plan phase produced is gone. Restore the saved plan from storage before applying it.
 		if err := restorePlanFile(); err != nil {
 			logger.Warnf("Could not restore saved plan for run %s (apply will likely fail): %v", run.ID, err)
