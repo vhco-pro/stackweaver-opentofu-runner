@@ -18,6 +18,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -711,8 +712,7 @@ func (a *TFAgentRunner) runTerraform(job TFPendingJob, artifacts *TFJobArtifacts
 		buffer:   streamBuf,
 		lastSend: time.Now(),
 	}
-	cmd.Stdout = io.MultiWriter(streamer, fullOutput, os.Stdout)
-	cmd.Stderr = io.MultiWriter(streamer, fullOutput, os.Stderr)
+	cmd.Stdout, cmd.Stderr = jobOutputWriters(streamer, fullOutput, os.Stdout, os.Stderr)
 
 	err = cmd.Run()
 	streamer.flush()
@@ -968,6 +968,29 @@ func removeHCLBlock(content, opener string) string {
 			return content
 		}
 	}
+}
+
+// lockedWriter serializes writes to an io.Writer that is not safe for concurrent use.
+type lockedWriter struct {
+	mu sync.Mutex
+	w  io.Writer
+}
+
+func (l *lockedWriter) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.w.Write(p)
+}
+
+// jobOutputWriters returns the writers for a tofu process's stdout and stderr. Both feed the
+// same streamer and output buffer, which are not goroutine-safe (AUD-028): os/exec only shares
+// one copy goroutine when Stdout and Stderr are the identical value, and here they differ
+// (each also tees to its own console stream), so exec copies the two pipes on two goroutines.
+// The shared sinks therefore sit behind one mutex; only the console tees stay unsynchronized,
+// as os.Stdout and os.Stderr are safe for concurrent writes.
+func jobOutputWriters(streamer, fullOutput, stdout, stderr io.Writer) (io.Writer, io.Writer) {
+	shared := &lockedWriter{w: io.MultiWriter(streamer, fullOutput)}
+	return io.MultiWriter(shared, stdout), io.MultiWriter(shared, stderr)
 }
 
 // tfStreamWriter implements io.Writer to stream output to the server
