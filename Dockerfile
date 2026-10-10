@@ -29,13 +29,13 @@ COPY backend/ .
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o runner ./cmd/runner
 
 # Runtime stage - Chainguard wolfi-base: zero-CVE target, has shell + apk, glibc-based
-FROM cgr.dev/chainguard/wolfi-base@sha256:08df5982c3d27e70a4ce1607e3bb9af09d746f8722cf135a7694afef879fc5a2
+FROM cgr.dev/chainguard/wolfi-base@sha256:1c451d46a0d5c4e9f2b38e0e8d3e299564a1aa95c21973efcc1980a9d1d2e73e
 
 # Build arguments for the baked-in OpenTofu version and architecture.
 # Other catalogued versions are downloaded (and checksum-verified) on first use at run time
 # by core/tofu; this one ships in the image so the common path needs no network.
 ARG TARGETARCH
-ARG TOFU_VERSION=1.12.6
+ARG TOFU_VERSION=1.13.1
 
 # Install runtime dependencies, then remove build-only tools
 # Install OpenTofu, verifying the archive against the release's published SHA256SUMS before
