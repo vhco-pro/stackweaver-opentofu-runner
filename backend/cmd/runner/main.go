@@ -1355,6 +1355,12 @@ func processJob(
 				if shouldAutoApply {
 					logger.Infof("Plan-and-apply run %s plan phase completed, transitioning to applying phase (%s)", run.ID, autoApplyReason)
 
+					// AUD-148: the apply phase is a separate job in a fresh working dir and restores
+					// this exact plan from object storage. Persist it BEFORE the run becomes
+					// `applying`: from that moment the orchestrator may dispatch the apply job, and
+					// the persist below this block only covers a run that stopped at `planned`.
+					persistPlanFile()
+
 					// Transition to applying phase (orchestrator will pick it up)
 					now := time.Now()
 					run.Status = models.RunStatusApplying
@@ -1363,13 +1369,14 @@ func processJob(
 					if _, err := runRepo.CompleteIfNotCanceled(run); err != nil {
 						logger.Warnf("Failed to transition run %s to applying phase: %v", run.ID, err)
 					} else {
-						// Clear the dispatch claim consumed by the PLAN dispatch, or the orchestrator's
+						// Release the dispatch claim consumed by the PLAN dispatch, or the orchestrator's
 						// ClaimForDispatch for the apply phase can never succeed and the run wedges at
 						// `applying` until the timeout reaper kills it. The manual-confirm path (Apply
-						// endpoint) already did this; this auto-apply path never did (pre-existing bug,
-						// found while wiring run tasks - see #554).
-						if clearErr := runRepo.ClearDispatch(run.ID); clearErr != nil {
-							logger.Warnf("Failed to clear dispatch claim for auto-applied run %s: %v", run.ID, clearErr)
+						// endpoint) clears it in its own request; here the claim must also come off
+						// the in-memory run, which the job saves in full when it ends (see
+						// releaseDispatchClaim).
+						if clearErr := releaseDispatchClaim(runRepo, run); clearErr != nil {
+							logger.Warnf("Auto-applied run %s keeps its plan dispatch claim: %v", run.ID, clearErr)
 						}
 						logger.Infof("Run %s transitioned to applying phase, orchestrator will pick it up", run.ID)
 					}
@@ -1590,6 +1597,22 @@ func processJob(
 	}
 
 	logger.Infof("Job completed: RunID=%s, Status=%s", job.RunID, run.Status)
+	return nil
+}
+
+// releaseDispatchClaim clears the dispatch claim of a run that is moving to a phase the
+// orchestrator must dispatch again, in the database and on the struct the job holds.
+//
+// Both halves are needed. The job ends with a full Save of that struct, so a claim cleared only
+// in the database is written straight back by the final save: the orchestrator can then never
+// claim the apply phase (ClaimForDispatch requires a NULL claim) and the run sits at `applying`
+// until the timeout reaper fails it. The agent finalize path in runner_agent.go resets the field
+// for the same reason; the two paths must stay in step.
+func releaseDispatchClaim(runRepo *repository.RunRepository, run *models.Run) error {
+	if err := runRepo.ClearDispatch(run.ID); err != nil {
+		return fmt.Errorf("clearing dispatch claim: %w", err)
+	}
+	run.DispatchedAt = nil
 	return nil
 }
 
