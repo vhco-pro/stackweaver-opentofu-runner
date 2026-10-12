@@ -467,10 +467,13 @@ func processJob(
 
 	// TFE-compatible: Download configuration files from storage if configuration version exists
 	// This is the primary method - configuration files are uploaded via PUT /api/v2/configuration-versions/:id/upload
+	// The configuration version is loaded within the run's workspace: a run row stored before
+	// the API checked may name one uploaded to another workspace, and that one is not found here,
+	// so the run fails before any of its code is downloaded.
 	var configVersion *models.ConfigurationVersion
 	if run.ConfigurationVersionID != nil {
 		var err error
-		configVersion, err = configVersionRepo.GetByID(*run.ConfigurationVersionID)
+		configVersion, err = configVersionRepo.GetByIDForWorkspace(*run.ConfigurationVersionID, run.WorkspaceID)
 		if err != nil {
 			run.Status = models.RunStatusFailed
 			run.ErrorMessage = fmt.Sprintf("Failed to get configuration version: %v", err)
@@ -1251,7 +1254,7 @@ func processJob(
 					shouldAutoApply = true
 					autoApplyReason = "per-run auto-apply intent (go-tfe auto-apply)"
 				} else if run.ConfigurationVersionID != nil {
-					configVersion, cvErr := configVersionRepo.GetByID(*run.ConfigurationVersionID)
+					configVersion, cvErr := configVersionRepo.GetByIDForWorkspace(*run.ConfigurationVersionID, run.WorkspaceID)
 					if cvErr == nil && configVersion != nil && configVersion.Source == "tfe-vcs" && workspace.AutoApply {
 						shouldAutoApply = true
 						autoApplyReason = "VCS-triggered with workspace auto-apply"
@@ -1452,7 +1455,7 @@ func processJob(
 					commitHash := ""
 					committer := ""
 					if run.ConfigurationVersionID != nil {
-						cv, cvErr := configVersionRepo.GetByID(*run.ConfigurationVersionID)
+						cv, cvErr := configVersionRepo.GetByIDForWorkspace(*run.ConfigurationVersionID, run.WorkspaceID)
 						if cvErr == nil && cv != nil {
 							commitHash = cv.CommitHash
 							committer = cv.Committer
@@ -1532,7 +1535,7 @@ func processJob(
 					commitHash := ""
 					committer := ""
 					if run.ConfigurationVersionID != nil {
-						configVersion, err := configVersionRepo.GetByID(*run.ConfigurationVersionID)
+						configVersion, err := configVersionRepo.GetByIDForWorkspace(*run.ConfigurationVersionID, run.WorkspaceID)
 						if err == nil && configVersion != nil {
 							// Extract commit info from configuration version (set by VCS webhook)
 							commitHash = configVersion.CommitHash
