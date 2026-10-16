@@ -606,10 +606,9 @@ func (a *TFAgentRunner) runTerraform(job TFPendingJob, artifacts *TFJobArtifacts
 	// #nosec G204 -- args are constructed from trusted sources
 	initCmd := exec.Command(tfBinary, "init", "-no-color", "-input=false", "-reconfigure") //nolint:gosec,noctx // G204: intentional opentofu execution; no long-running context needed
 	initCmd.Dir = terraformDir
-	initCmd.Env = os.Environ()
-	for k, v := range artifacts.EnvironmentVars {
-		initCmd.Env = append(initCmd.Env, k+"="+v)
-	}
+	// The run's environment never carries the agent's own (its runner token, whatever the host
+	// holds): tofu.RunEnv admits only what OpenTofu needs and what the operator passes through.
+	initCmd.Env = tofu.RunEnv(artifacts.EnvironmentVars)
 	initOut, initErr := initCmd.CombinedOutput()
 	if initErr != nil {
 		logger.Errorf("Terraform init output: %s", string(initOut))
@@ -647,11 +646,8 @@ func (a *TFAgentRunner) runTerraform(job TFPendingJob, artifacts *TFJobArtifacts
 		isPlan = true
 	}
 
-	// Build environment for terraform commands
-	tfEnv := os.Environ()
-	for k, v := range artifacts.EnvironmentVars {
-		tfEnv = append(tfEnv, k+"="+v)
-	}
+	// Environment for the run's commands (plan or apply, then show or the state upload).
+	tfEnv := tofu.RunEnv(artifacts.EnvironmentVars)
 
 	// Cancellable context: poll API for run cancellation and cancel to stop terraform
 	runCtx, cancelRun := context.WithCancel(context.Background())

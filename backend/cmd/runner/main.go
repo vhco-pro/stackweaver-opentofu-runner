@@ -28,6 +28,7 @@ import (
 	"github.com/michielvha/stackweaver/core/queue"
 	"github.com/michielvha/stackweaver/core/repository"
 	"github.com/michielvha/stackweaver/core/security/archive"
+	"github.com/michielvha/stackweaver/core/security/runenv"
 	"github.com/michielvha/stackweaver/core/services/encryptionkey"
 	"github.com/michielvha/stackweaver/core/services/logbuffer"
 	"github.com/michielvha/stackweaver/core/services/logparser"
@@ -101,6 +102,13 @@ func main() {
 	// Initialize logger first (reads LOG_LEVEL from environment)
 	logLevel := os.Getenv("LOG_LEVEL")
 	logger.Init(logLevel)
+
+	// Runs execute as this process's user; without this they could read the runner's secrets
+	// (or an agent's token) from its /proc environ (#936). Both the queue and the agent path
+	// pass through here.
+	if err := runenv.DenySameUserInspection(); err != nil {
+		logger.Fatalf("Refusing to start: %v", err)
+	}
 
 	// Check if running in agent mode (self-hosted runner)
 	if os.Getenv("RUNNER_MODE") == "agent" {
