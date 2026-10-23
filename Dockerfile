@@ -10,7 +10,7 @@
 # Example: docker build -f runner-images/opentofu/Dockerfile -t stackweaver/runner-opentofu:latest .
 
 # Build stage
-FROM golang:1.27.2-alpine@sha256:f92b6ef800e499660581efdabdf25d9d817a9d124eaf900924f0504e7e27e12d AS builder
+FROM golang:1.27.3-alpine@sha256:b8c9b82affbbb82a020bbcf998dad2ba9516944ac7e883524642a481a9505e9c AS builder
 ENV GOPRIVATE=github.com/michielvha/stackweaver
 
 WORKDIR /app
@@ -29,7 +29,7 @@ COPY backend/ .
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o runner ./cmd/runner
 
 # Runtime stage - Chainguard wolfi-base: zero-CVE target, has shell + apk, glibc-based
-FROM cgr.dev/chainguard/wolfi-base@sha256:1c451d46a0d5c4e9f2b38e0e8d3e299564a1aa95c21973efcc1980a9d1d2e73e
+FROM cgr.dev/chainguard/wolfi-base@sha256:c2a4815b6ca49b9bbafd451b4bde690d567a86b2b6b54877faac8082a7bc4296
 
 # Build arguments for the baked-in OpenTofu version and architecture.
 # Other catalogued versions are downloaded (and checksum-verified) on first use at run time
