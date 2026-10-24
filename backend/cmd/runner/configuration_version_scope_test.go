@@ -108,7 +108,7 @@ func TestProcessJob_ConfigurationVersionOfAnotherWorkspace(t *testing.T) {
 		store := &recordingStorage{}
 		err = processJob(t.Context(), job, nil,
 			repository.NewWorkspaceRepository(db), repository.NewRunRepository(db), repository.NewConfigurationVersionRepository(db),
-			nil, nil, store, nil, nil, nil, nil, nil, nil, nil)
+			nil, nil, store, nil, nil, nil, nil, nil, nil, nil, nil)
 		if err == nil {
 			t.Errorf("processJob succeeded with a storage client that holds nothing")
 		}

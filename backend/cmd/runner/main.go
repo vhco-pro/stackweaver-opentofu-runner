@@ -252,7 +252,7 @@ func main() {
 					}
 					continue
 				}
-				perr := processJob(ctx, payload, logBufferService, workspaceRepo, runRepo, configVersionRepo, phaseStateRepo, taskStageRepo, storageClient, stateService, variableService, azureOIDCRepo, awsOIDCRepo, gcpOIDCRepo, vaultOIDCRepo, oidcTokenService)
+				perr := processJob(ctx, payload, logBufferService, workspaceRepo, runRepo, configVersionRepo, phaseStateRepo, taskStageRepo, storageClient, stateService, variableService, azureOIDCRepo, awsOIDCRepo, gcpOIDCRepo, vaultOIDCRepo, oidcTokenService, atRestCrypto)
 				if errors.Is(perr, errPoisonMessage) {
 					logger.Errorf("Dead-lettering unprocessable job: %v", perr)
 					if dErr := redisQueue.DeadLetter(context.Background(), "runs", consumerID, payload); dErr != nil { //nolint:contextcheck
@@ -322,6 +322,7 @@ func processJob(
 	gcpOIDCRepo *repository.GCPOIDCConfigurationRepository,
 	vaultOIDCRepo *repository.VaultOIDCConfigurationRepository,
 	oidcTokenService *oidc.TokenService,
+	atRestCrypto *crypto.CryptoService,
 ) error {
 	var job Job
 	if err := json.Unmarshal(jobData, &job); err != nil {
@@ -1033,25 +1034,10 @@ func processJob(
 	// for a clean checkout - so the plan.out the plan phase saved is gone by the time the apply job
 	// runs `terraform apply plan.out`. Persist the saved plan across the phase boundary through object
 	// storage so the apply phase runs the exact plan that was reviewed (TFE semantics), not a re-plan.
-	planFileKey := fmt.Sprintf("runs/%s/plan.out", run.ID)
-	persistPlanFile := func() {
-		data, err := os.ReadFile(filepath.Join(terraformDir, "plan.out")) //nolint:gosec // plan.out is inside the run's own workspace dir
-		if err != nil {
-			logger.Warnf("Could not read plan file to persist for run %s: %v", run.ID, err)
-			return
-		}
-		if err := storageClient.Put(ctx, planFileKey, data); err != nil {
+	persistPlan := func() {
+		if err := persistPlanFile(ctx, storageClient, atRestCrypto, run.ID, terraformDir); err != nil {
 			logger.Warnf("Failed to persist plan file for run %s: %v", run.ID, err)
-			return
 		}
-		logger.Infof("Persisted plan file for run %s (%d bytes)", run.ID, len(data))
-	}
-	restorePlanFile := func() error {
-		data, err := storageClient.Get(ctx, planFileKey)
-		if err != nil {
-			return fmt.Errorf("failed to fetch saved plan for run %s: %w", run.ID, err)
-		}
-		return os.WriteFile(filepath.Join(terraformDir, "plan.out"), data, 0o600)
 	}
 
 	// Execute plan phase
@@ -1295,7 +1281,7 @@ func processJob(
 				}
 				// The apply job (if the run gets that far) restores this exact plan (AUD-148).
 				if hasChanges && (run.Operation == models.RunOperationPlanAndApply || run.Operation == models.RunOperationDestroy) {
-					persistPlanFile()
+					persistPlan()
 				}
 				logger.Infof("Run %s paused at post_plan task stage (auto-apply resolved: %v)", run.ID, shouldAutoApply)
 				return nil
@@ -1370,7 +1356,7 @@ func processJob(
 					// this exact plan from object storage. Persist it BEFORE the run becomes
 					// `applying`: from that moment the orchestrator may dispatch the apply job, and
 					// the persist below this block only covers a run that stopped at `planned`.
-					persistPlanFile()
+					persistPlan()
 
 					// Transition to applying phase (orchestrator will pick it up)
 					now := time.Now()
@@ -1402,7 +1388,7 @@ func processJob(
 		// job can restore it after wiping the workspace dir.
 		if run.Status == models.RunStatusPlanned &&
 			(run.Operation == models.RunOperationPlanAndApply || run.Operation == models.RunOperationDestroy) {
-			persistPlanFile()
+			persistPlan()
 		}
 	}
 
@@ -1433,7 +1419,7 @@ func processJob(
 		}
 		// AUD-148: this apply job runs in a fresh working dir with re-extracted config, so the plan.out the
 		// plan phase produced is gone. Restore the saved plan from storage before applying it.
-		if err := restorePlanFile(); err != nil {
+		if err := restorePlanFile(ctx, storageClient, atRestCrypto, run.ID, terraformDir); err != nil {
 			logger.Warnf("Could not restore saved plan for run %s (apply will likely fail): %v", run.ID, err)
 		}
 		applyResult, err := plugin.ApplyWithOptions(cancellableApplyCtx, terraformDir, "plan.out", envVars, applyOptions)
@@ -1445,7 +1431,7 @@ func processJob(
 		// Logs are already in Redis from streaming callback, even if applyResult is nil
 		copyLogsFromRedisToStorage("apply")
 		// AUD-148: the saved plan has now been consumed by apply; best-effort delete it from storage.
-		if delErr := storageClient.Delete(ctx, planFileKey); delErr != nil {
+		if delErr := storageClient.Delete(ctx, planFileKey(run.ID)); delErr != nil {
 			logger.Warnf("Failed to delete stored plan file for run %s: %v", run.ID, delErr)
 		}
 		// Check if run was cancelled during apply
