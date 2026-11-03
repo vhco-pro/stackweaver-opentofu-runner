@@ -10,12 +10,13 @@ import (
 	"path/filepath"
 
 	"github.com/michielvha/stackweaver/core/crypto"
+	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/storage"
 )
 
 // planFileKey is where a run's saved plan waits between its plan job and its apply job.
 func planFileKey(runID string) string {
-	return fmt.Sprintf("runs/%s/plan.out", runID)
+	return models.RunPlanFileKey(runID)
 }
 
 // persistPlanFile stores the saved plan in dir for the apply job, encrypted at rest under the

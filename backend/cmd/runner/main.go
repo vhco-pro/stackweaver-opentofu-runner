@@ -506,7 +506,7 @@ func processJob(
 
 		// Download configuration files from storage
 		// Path: configuration-versions/{config_version_id}/config.tar.gz
-		configStorageKey := fmt.Sprintf("configuration-versions/%s/config.tar.gz", configVersion.ID)
+		configStorageKey := models.ConfigurationTarballKey(configVersion.ID)
 		logger.Infof("Downloading configuration from storage: %s", configStorageKey)
 
 		configData, err := storageClient.Get(ctx, configStorageKey)
@@ -855,10 +855,10 @@ func processJob(
 		var logsKey string
 		if run.Operation == models.RunOperationPlanAndApply {
 			// For plan-and-apply runs, use phase-specific keys: plan.log or apply.log
-			logsKey = fmt.Sprintf("runs/%s/logs/%s.log", run.ID, phase)
+			logsKey = models.RunLogKey(run.ID, phase)
 		} else {
 			// For other runs, use operation name
-			logsKey = fmt.Sprintf("runs/%s/logs/%s.log", run.ID, job.Operation)
+			logsKey = models.RunLogKey(run.ID, job.Operation)
 		}
 		if err := storageClient.Put(ctx, logsKey, []byte(logs)); err != nil {
 			logger.Warnf("Failed to store logs to storage for run %s: %v", run.ID, err)
@@ -875,7 +875,7 @@ func processJob(
 	// Helper function to store parsed phase state in database
 	storePhaseState := func(phase string) {
 		// Get logs from storage
-		logsKey := fmt.Sprintf("runs/%s/logs/%s.log", run.ID, phase)
+		logsKey := models.RunLogKey(run.ID, phase)
 		logsBytes, err := storageClient.Get(ctx, logsKey)
 		if err != nil {
 			logger.Warnf("Failed to get logs from storage for run %s phase %s: %v", run.ID, phase, err)
