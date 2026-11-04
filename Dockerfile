@@ -40,7 +40,9 @@ ARG TOFU_VERSION=1.13.1
 # Install runtime dependencies, then remove build-only tools
 # Install OpenTofu, verifying the archive against the release's published SHA256SUMS before
 # trusting an executable we then run (AUD-058: TLS alone is not integrity).
-RUN apk add --no-cache git ca-certificates wget unzip && \
+# cosign verifies each OpenTofu release a launcher's populator promotes into an organization's
+# cache (#933, D7).
+RUN apk add --no-cache git ca-certificates wget unzip iptables ip6tables nftables cosign && \
     ARCH=$(case ${TARGETARCH:-amd64} in amd64) echo "amd64" ;; arm64) echo "arm64" ;; *) echo "amd64" ;; esac) && \
     BASE="https://github.com/opentofu/opentofu/releases/download/v${TOFU_VERSION}" && \
     ZIP="tofu_${TOFU_VERSION}_linux_${ARCH}.zip" && \
@@ -58,6 +60,10 @@ RUN apk add --no-cache git ca-certificates wget unzip && \
 # matters for the shared workspaces volume - it stayed 1001 across the iac -> stackweaver rename.
 RUN addgroup -g 1001 stackweaver && \
     adduser -D -u 1001 -G stackweaver -h /home/stackweaver stackweaver
+
+# A launcher's node-local, read-only cache copy (RUNNER_CACHE_DIR): owned by the image's user, so a
+# named volume mounted here starts out writable by an in-process launcher too.
+RUN mkdir -p /var/cache/stackweaver-launcher && chown stackweaver:stackweaver /var/cache/stackweaver-launcher
 
 USER stackweaver
 
