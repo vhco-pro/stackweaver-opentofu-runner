@@ -1,5 +1,6 @@
-# OpenTofu Runner Dockerfile
-# This builds the self-hosted runner that executes OpenTofu plans/applies.
+# OpenTofu job image Dockerfile
+# This builds the OpenTofu job image: the image OpenTofu runs execute in, which also starts an
+# in-process launcher for OpenTofu by default (one-launcher spec, A5, OD4).
 # NOTE: This Dockerfile must be built from the repository root (context = repo root)
 #
 # Stackweaver runs OpenTofu (MPL-2.0) and never Terraform. Terraform >= 1.6 is BUSL-1.1 licensed,
@@ -25,8 +26,10 @@ RUN --mount=type=secret,id=netrc,target=/root/.netrc go mod download
 # Copy source code
 COPY backend/ .
 
-# Build the runner binary (the OpenTofu runner uses cmd/runner)
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o runner ./cmd/runner
+# Build the launcher binary, which carries every engine's executor; VERSION is the release it
+# reports.
+ARG VERSION=dev
+RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -ldflags "-X main.version=${VERSION}" -o stackweaver-launcher ./cmd/launcher
 
 # Runtime stage - Chainguard wolfi-base: zero-CVE target, has shell + apk, glibc-based
 FROM cgr.dev/chainguard/wolfi-base@sha256:c2a4815b6ca49b9bbafd451b4bde690d567a86b2b6b54877faac8082a7bc4296
@@ -65,13 +68,15 @@ RUN addgroup -g 1001 stackweaver && \
 # named volume mounted here starts out writable by an in-process launcher too.
 RUN mkdir -p /var/cache/stackweaver-launcher && chown stackweaver:stackweaver /var/cache/stackweaver-launcher
 
+# The launcher binary at the constant executor path, and a link at the old path, so an older
+# launcher that runs `/usr/local/bin/runner executor` in this image still starts its executor.
+COPY --from=builder /app/stackweaver-launcher /usr/local/bin/stackweaver-launcher
+RUN ln -s stackweaver-launcher /usr/local/bin/runner
+
 USER stackweaver
 
 # Create workspaces directory
 RUN mkdir -p /home/stackweaver/workspaces
-
-# Copy the runner binary from builder
-COPY --from=builder /app/runner /usr/local/bin/runner
 
 # Set working directory
 WORKDIR /home/stackweaver
@@ -79,5 +84,5 @@ WORKDIR /home/stackweaver
 # Environment variables
 ENV WORKSPACES_DIR=/home/stackweaver/workspaces
 
-# Run the runner
-CMD ["/usr/local/bin/runner"]
+# Start an in-process launcher for OpenTofu
+CMD ["/usr/local/bin/stackweaver-launcher"]
